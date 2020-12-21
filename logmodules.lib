@@ -1,0 +1,515 @@
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+version="version logmodules.lib 1.0.0.0 Apr_2020" // $Id: 8831501251e6607a4e30cef97bd72587addbf16f $
+category="Singularity Theory";
+info="
+LIBRARY:   logmodules.lib Procedures for multi-logarithmic differential forms and vector fields
+AUTHORS:   Raul Epure,     epure@mathematik.uni-kl.de,
+           Delphine Pol,   pol@mathematik.uni-kl.de
+
+OVERVIEW:
+A library for computing the modules of multi-logarithmic forms or vector fields of an
+equidimensional reduced subspace.
+The output for multi-logarithmic forms can be either a module or a list of objects of
+type 'difform', making them symbolically accessible.
+We provide algorithms for the following:
+- Multi-logarithmic forms/ vector fields,
+- computing a complete intersection containing a given equidimensional subspace is provided, and
+- a test to check the freeness of an equidimensional subspace.
+
+KEYWORDS: differential forms; logarithmic modules; vector fields; freeness;
+
+PROCEDURES:
+Omegalog(int q, ideal IX, list #);   Computes the module of multi-logarithmic q-forms of an equidimensional, reduced subspace defined by IX
+OmegalogC(int q, ideal IC, list #);   Computes the module of multi-logarithmic q-forms of a reduced complete intersection IC
+OmegalogXC( int q, ideal IX, ideal IC, list #);   Computes the module of multi-logarithmic q-forms of an equidimensional, reduced subspace defined by IX contained in a complete intersection IC
+eqdim_ci(ideal IX, list #);   Computes a complete intersection containing IX with the same codimension as IX
+Derlog(ideal IX, list #);   Computes the module of multi-logarithmic vector fields of an equidimensional, reduced subspace defined by IX
+is_free_singularity(ideal IX, int k);   Checks if the equidimensional, reduced subspace defined by IX is a free singularity
+";
+
+LIB "sing.lib";
+LIB "matrix.lib";
+LIB "difform.lib";
+
+
+////////////////////////////////////////////////////////////
+//////////// MULTI-LOGARITHMIC FORMS ///////////////////////
+////////////////////////////////////////////////////////////
+
+proc Omegalog(int q, ideal IX, list #)
+"USAGE:   Omegalog(int q, ideal IX, list #);
+ASSUME:   A differential algebra was already constructed.
+RETURN:   Computes the multi-logarithmic q-forms of the
+          equidimensional, reduced subspace defined by IX.
+          If IX is not a complete intersection and no
+          complete intersection is specified, a list
+          containing the module and the ideal IC defining a
+          complete intersection containing the variety defined
+          by IX is returned. In this case IX has to be a
+          standard basis.
+          If the user knows a complete intersection ideal,
+          it shall be passed as the first additional argument.
+          Furthermore, the string 'form' can be passed,
+          so that instead of a module, a list of forms
+          is returned.
+NOTE:   The algorithm does not check whether IX is
+        equidimensional, radical, IC is contained in IX, IC
+        is radical or IC defines a complete intersection.
+EXAMPLE:   example Omegalog; shows an example"
+{
+ //Case where a complete intersection ideal is passed.
+   if(size(#)>0 && typeof(#[1]) == "ideal")
+   {
+     if (size(#) == 1)
+     {
+        return(OmegalogXC(q, IX, #[1]));
+     }
+     return(OmegalogXC(q, IX, #[1], #[2]));
+   }
+   //Test if I is complete intersection
+   if(is_ci(IX) == 1)
+   {
+     return(OmegalogC(q, IX, #));
+   }
+
+   ideal IC = eqdim_ci(IX);
+   list L = IC;
+   L = insert(L, OmegalogXC(q, IX, IC, #));
+   return(L);
+}
+
+example
+{
+"EXAMPLE:"; echo = 2;
+
+ring R = 0,(x,y,z,t),ds;
+diffAlgebra();
+ideal IX = xz, xt,yz,yt;
+ideal IC = xy, zt;
+
+
+///////////////////////////////////////////////////////////////
+// Example for logarithmic q-forms with a module as output   //
+///////////////////////////////////////////////////////////////
+module Om   = Omegalog(2, IX, IC);
+print(Om);
+
+////////////////////////////////////////////////////////////////////
+// Example for logarithmic q-forms with a list of forms as output //
+////////////////////////////////////////////////////////////////////
+
+list L   = Omegalog(2, IX, IC, "forms");
+print(L);
+
+////////////////////////////////////////////////////////////////////
+// Example for logarithmic q-forms where IC is computed         //
+////////////////////////////////////////////////////////////////////
+list LL = Omegalog(2, std(IX));
+print(LL);
+
+list LLL = Omegalog(2, std(IX), "forms");
+print(LLL);
+}
+
+///////////////////////////////////////////////////////////
+// Complete Intersection case                            //
+///////////////////////////////////////////////////////////
+proc OmegalogC(int q, ideal IC, list #)
+"USAGE:   OmegalogC(int q, ideal IC, list #);
+ASSUME:   A differential algebra was already constructed.
+RETURN:   Computes the multi-logarithmic q-forms of the
+          complete intersection defined by IC.
+          If the string 'forms' is passed as a third argument,
+          a list of forms is returned instead of a module.
+NOTE:   The algorithm does not check whether IC is radical
+        or defines a complete intersection.
+EXAMPLE:   example OmegalogC; shows an example"
+{
+   int n = nvars(basering);
+   int k = ncols(IC);
+   int a, b, c, i, j;
+
+
+   // Compute the differentials of the f_i, where IC = <f_1, \ldots, f_k>
+   for (i = 1; i <= k; i++)
+   {
+     difform df(i) = difformUnivDer(IC[i]);
+   }
+
+   list V = diffAlgebraListGen(q);
+   list W = diffAlgebraListGen(q + 1);
+   int s = size(V);
+   int t = size(W);
+
+   matrix A[k*t][s + k*k*t];
+   list L;
+   difform w;
+
+   // Compute matrix to obtain OmegalogC as a truncation of its syzygies.
+   for (i = 1; i <= k; i++)
+   {
+     for (a = 1; a <= t; a++)
+     {
+       for (b = 1; b <= k; b++)
+       {
+         A[t*(i-1) + a, s + (i-1)*t*k + (a-1)*k + b] = IC[b];
+       }
+     }
+   }
+
+   for (i = 1; i <= k; i++)
+   {
+     for (a = 1; a <= s; a++)
+     {
+       w = difformMul(df(i), V[a]);
+       L = difformCoef(w);
+       for (b = 1; b <= size(L); b++)
+       {
+         for (c = 1; c <= t; c++)
+         {
+            if (difformEqu(L[b][1], W[c]) == 1)
+            {
+              A[(i-1)*t + c, a] = L[b][2];
+            }
+         }
+       }
+     }
+   }
+
+   //Compute OmegalogC as the truncation of the syzygies of the matrix A.
+   matrix K = matrix(syz(A));
+   module Om = submat(K, 1..s, 1..ncols(K));
+   if(size(#) == 0)
+   {
+      return(simplify(Om, 2 + 4));
+   }
+   if(size(#) > 0 && #[1] == "forms")
+   {
+   // Return the a list containing the forms
+   Om = minbase(Om);
+   list F;
+   for(i = 1; i<= size(Om); i++)
+   {
+     w = 0;
+     for(j = 1; j <= s; j++)
+     {
+       w = difformAdd(w, Om[i][j]*V[j]);
+     }
+     F = insert(F, w);
+   }
+   return(F);
+   }
+}
+
+example
+{
+"EXAMPLE:"; echo = 2;
+
+ring R = 0,(x,y,z,t),ds;
+diffAlgebra();
+ideal I = xy, zt;
+
+///////////////////////////////////////////////////////////////
+// Example for logarithmic q-forms with a module as output   //
+///////////////////////////////////////////////////////////////
+module Om   = OmegalogC(2, I);
+print(Om);
+
+////////////////////////////////////////////////////////////////////
+// Example for logarithmic q-forms with a list of forms as output //
+////////////////////////////////////////////////////////////////////
+
+list L   = OmegalogC(2, I, "forms");
+print(L);
+}
+
+///////////////////////////////////////////////////////////
+// Equidimensional case                                  //
+///////////////////////////////////////////////////////////
+proc OmegalogXC( int q, ideal IX, ideal IC, list #)
+"USAGE:   OmegalogXC(int q, ideal IX, ideal IC, list #);
+ASSUME:   A differential algebra was already constructed.
+RETURN:   Computes the multi-logarithmic q-forms of the
+          equidimensional, reduced subspace defined by IX
+          with respect to the complete intersection defined
+          by IC.
+          If the string 'forms' is passed as a fourth
+          argument, a list of forms is returned
+          instead of a module.
+NOTE:   The algorithm does not check whether IX is
+        equidimensional, radical, IC is contained in IX,
+        IC is radical or IC defines a complete intersection.
+EXAMPLE:   example OmegalogXC; shows an example"
+{
+   int n = nvars(basering);
+   int k = ncols(IC);
+   int m = ncols(IX);
+   int a, b, c, i, j;
+
+   // Compute the differentials of the f_i, where IX = <f_1, \ldots, f_m>
+   for (i=1; i <= m; i++)
+   {
+     difform df(i) = difformUnivDer(IX[i]);
+   }
+
+   list V = diffAlgebraListGen(q);
+   list W = diffAlgebraListGen(q + 1);
+   int s = size(V);
+   int t = size(W);
+
+   matrix A[m*t + m*s][s + k*m*t + k*m*s];
+   list L;
+   difform w;
+
+   // Compute matrix to obtain OmegalogC as a truncation of its syzygies.
+   for (i = 1; i <= m; i++)
+   {
+     for (b = 1; b <= k; b++)
+
+     {
+       for (a = 1; a <= t; a++)
+       {
+         A[t*(i-1) + a, s + (i-1)*t*k + (a-1)*k + b] = IC[b];
+       }
+       for (a = 1; a <= s; a++)
+       {
+         A[m*t + s*(i-1) + a, s + k*t*m + k*s*(i-1) + k*(a-1) + b] = IC[b];
+       }
+     }
+   }
+
+   for (i = 1; i <= m; i++)
+   {
+     for (a = 1; a <= s; a++)
+     {
+       A[m*t + s*(i-1) + a, a] = IX[i];
+       w = difformMul(df(i), V[a]);
+       L = difformCoef(w);
+       for (b = 1; b <= size(L); b++)
+       {
+         for (c = 1; c <= t; c++)
+         {
+            if (difformEqu(L[b][1], W[c]) == 1)
+            {
+              A[(i-1)*t + c, a] = L[b][2];
+            }
+         }
+       }
+     }
+   }
+
+   //Compute OmegalogXC as the truncation of the syzygies of the matrix A.
+   matrix K = matrix(syz(A));
+   module Om = submat(K, 1..s, 1..ncols(K));
+   if(size(#) == 0)
+   {
+      return(simplify(Om, 2 + 4));
+   }
+   if(size(#) > 0 && #[1] == "forms")
+   {
+   // Return the a list containing the forms
+   Om = minbase(Om);
+   list F;
+   for(i = 1; i<= size(Om); i++)
+   {
+     w = 0;
+     for(j = 1; j <= s; j++)
+     {
+       w = difformAdd(w, Om[i][j]*V[j]);
+     }
+     F = insert(F, w);
+   }
+   return(F);
+   }
+}
+example
+{
+"EXAMPLE:"; echo = 2;
+
+ring R = 0,(x,y,z,t),ds;
+diffAlgebra();
+ideal I = xy, zt;
+
+///////////////////////////////////////////////////////////////
+// Example for logarithmic q-forms with a module as output   //
+///////////////////////////////////////////////////////////////
+module Om   = OmegalogXC(2, I);
+print(Om);
+
+////////////////////////////////////////////////////////////////////
+// Example for logarithmic q-forms with a list of forms as output //
+////////////////////////////////////////////////////////////////////
+
+list L   = OmegalogXC(2, I, "forms");
+print(L);
+}
+
+////////////////////////////////////////////////////////////
+// Construct complete intersection containing eqdim space //
+////////////////////////////////////////////////////////////
+
+proc eqdim_ci(ideal IX, list #)
+"USAGE:   eqdim_ci(ideal IX, list #);
+RETURN:   Computes a complete intersection IC containing the
+          equidimensional subspace defined by IX. The ideal
+          IX has to be given by a standard basis, or an
+          additional parameter containing the codimension of
+          IX must be passed.
+          The algorithm does not check if IX is equidimensional.
+          A check for the correctness of IC is omitted.
+NOTE:   If the string 'forms' is passed as a fourth argument,
+        a list of forms is returned instead of a module.
+KEYWORDS:
+SEE ALSO:
+EXAMPLE:         example OmegalogXC; shows an example"
+{
+   int n = nvars(basering);
+   int m = ncols(IX);
+   if(size(#) == 0)
+   {
+      int k = n - dim(IX);
+   }
+   else
+   {
+      int k = #[1];
+   }
+   int i, j;
+   poly p;
+
+   ideal C;
+   for (i=1; i<= k; i++)
+   {
+      p = 0;
+      for(j = 1; j <= m; j++)
+      {
+         p = p + random(-20, 20)*IX[j];
+      }
+      C = C + p;
+   }
+   return(C);
+}
+
+example
+{
+"EXAMPLE:"; echo = 2;
+
+ring R = 0,(x,y,z,t),ds;
+ideal IX = xz, xt,yz,yt;
+
+ideal C1 = eqdim_ci(std(IX));
+ideal C2 = eqdim_ci(IX, 2);
+
+print(C1);
+print(C2);
+}
+
+///////////////////////////////////////////////////////////
+// MULTI-LOGARITHMIC VECTORFIELDS                        //
+///////////////////////////////////////////////////////////
+
+proc Derlog(ideal IX, list #)
+"USAGE:   Derlog(ideal IX, list #);
+RETURN:   Computes the multi-logarithmic vector fields of
+          degree k, where k is the codimension of the
+          equidimensional, reduced subspace defined by IX.
+NOTE:   The algorithm does not check whether IX is
+        equidimensional or radical. The user can pass the
+        codimension of IX as an additional input, otherwise
+        it is computed by the algortihm. In case the
+        algorithm has to compoute the codimension, IX has
+        to be a standard basis.
+EXAMPLE:   example Derlog; shows an example"
+{
+   int u = ncols(IX);
+   int n = nvars(basering);
+
+   // Compute codimension, if necessary
+   if(size(#) == 0)
+   {
+      int k = n - dim(IX);
+   }
+   else
+   {
+      int k = #[1];
+   }
+
+   int i, j;
+   matrix J = jacob(IX);
+   int b = int(binomial(n, k));
+   int c = int(binomial(u, k));
+   ideal M = minor(J, k, -b*c);
+
+   // Compute matrix to obtain DerlogX as a truncation of its syzygies.
+   matrix A[c][b + c*u];
+
+   for (i = 1; i<= c; i++)
+   {
+     for (j = 1; j<=u; j++)
+     {
+       A[i, b + (i-1)*u + j] = IX[j];
+     }
+     for (j = 1 ; j <= b; j++)
+     {
+       A[i, j] = M[(i-1)*b + j];
+     }
+   }
+
+   matrix K = matrix(syz(A));
+   module DD = submat(K, 1..b, 1..ncols(K));
+   return(simplify(DD, 2 + 4));
+}
+
+example
+{
+"EXAMPLE:"; echo = 2;
+
+ring R = 0,(x,y,z,t),ds;
+ideal I = xy, zt;
+
+///////////////////////////////////////////////////////////////
+// Example for multi-logarithmic vector fields of degree 2   //
+///////////////////////////////////////////////////////////////
+module DD1   = Derlog(I, 2);
+print(DD1);
+
+module DD2   = Derlog(std(I));
+print(DD2);
+}
+
+///////////////////////////////////////////////////////////
+// Test for freeness                                     //
+///////////////////////////////////////////////////////////
+
+proc is_free_singularity(ideal IX, int k)
+"USAGE:   is_free_singularity(ideal IX, int k);
+RETURN:   Checks if the equidimensional, reduced subspace of
+          codimension k defined by IX is a free singularity.
+          It returns 1 in case the subspace is free, 0
+          otherwise.
+NOTE:   The algorithm does not check whether IX is
+        equidimensional or radical. Furthermore, the
+        algorithm does not check if k is the correct
+        codimension.
+EXAMPLE:   example is_free_singularity; shows an example"
+{
+   module DD = Derlog(IX, k);
+   resolution L = mres(DD, 0);
+   return(dim(L) == k);
+}
+
+example
+{
+"EXAMPLE:"; echo = 2;
+
+ring R = 0,(x,y,z,t),ds;
+ideal I1 = xy, zt;
+ideal I2 = x*y*(x+y)*(x-y+z-t), z*t;
+
+///////////////////////////////////////////////////////////////
+// Check freeness                                            //
+///////////////////////////////////////////////////////////////
+is_free_singularity(I1, 2);
+
+is_free_singularity(I2, 2);
+}
